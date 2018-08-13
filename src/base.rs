@@ -888,28 +888,44 @@ pub fn trans_checked_int_binop<'a, 'tcx: 'a>(
 
     let lhs = in_lhs.load_value(fx);
     let rhs = in_rhs.load_value(fx);
-    let res = match bin_op {
-        BinOp::Add => fx.bcx.ins().iadd(lhs, rhs),
-        BinOp::Sub => fx.bcx.ins().isub(lhs, rhs),
-        BinOp::Mul => fx.bcx.ins().imul(lhs, rhs),
-        BinOp::Shl => fx.bcx.ins().ishl(lhs, rhs),
-        BinOp::Shr => {
+
+    let (res, has_overflow) = match bin_op {
+        BinOp::Add => {
             if !signed {
-                fx.bcx.ins().ushr(lhs, rhs)
+                fx.bcx.ins().iadd_cout(lhs, rhs)
             } else {
-                fx.bcx.ins().sshr(lhs, rhs)
+                fx.tcx.sess.warn("signed checked add are considered as always succeeding");
+                (fx.bcx.ins().iadd(lhs, rhs), fx.bcx.ins().bconst(types::B1, false))
             }
         }
-        _ => bug!(
-            "binop {:?} on checked int/uint lhs: {:?} rhs: {:?}",
-            bin_op,
-            in_lhs,
-            in_rhs
-        ),
+        BinOp::Sub => {
+            if signed {
+                fx.bcx.ins().isub_bout(lhs, rhs)
+            } else {
+                fx.tcx.sess.warn("signed checked sub are considered as always succeeding");
+                (fx.bcx.ins().isub(lhs, rhs), fx.bcx.ins().bconst(types::B1, false))
+            }
+        }
+        BinOp::Mul => {
+            fx.tcx.sess.warn("signed checked mul are considered as always succeeding");
+            (fx.bcx.ins().imul(lhs, rhs), fx.bcx.ins().bconst(types::B1, false))
+        }
+        BinOp::Shl => {
+            fx.tcx.sess.warn("signed checked shl are considered as always succeeding");
+            (fx.bcx.ins().ishl(lhs, rhs), fx.bcx.ins().bconst(types::B1, false))
+        }
+        BinOp::Shr => {
+            fx.tcx.sess.warn("signed checked shr are considered as always succeeding");
+            if !signed {
+                (fx.bcx.ins().ushr(lhs, rhs), fx.bcx.ins().bconst(types::B1, false))
+            } else {
+                (fx.bcx.ins().sshr(lhs, rhs), fx.bcx.ins().bconst(types::B1, false))
+            }
+        }
+        _ => bug!("binop {:?} on checked int/uint lhs: {:?} rhs: {:?}", bin_op, lhs, rhs),
     };
 
-    // TODO: check for overflow
-    let has_overflow = fx.bcx.ins().iconst(types::I8, 0);
+    let has_overflow = fx.bcx.ins().bint(types::I8, has_overflow);
 
     let out_place = CPlace::temp(fx, out_ty);
     let out_layout = out_place.layout();
